@@ -2,7 +2,7 @@ function ag_airgun_detector(varargin)
 
 parm = varargin{1};
 
-SearchFileMask = {'*df100.x.wav'};
+SearchFileMask = {'*x.wav'};
 SearchPathMask = parm.baseDir;
 SearchRecursiv = parm.recursSearch;
 
@@ -153,8 +153,8 @@ for fidx = 1:size(FileList,1) % Make sure to change the start of the file list s
                     % to when convolusion starts being above threshold.
                     s = expConv(eidx,1); % +1+round(length(template)*0.5);
                     e = expConv(eidx,2);% +round(length(template)*0.5);%-length(template)/2.
-                        hold on; plot(s,c2(s),'ro');plot(e,c2(e),'ko');hold off
-                    end
+                        %hold on; plot(s,c2(s),'ro');plot(e,c2(e),'ko');hold off
+                end
                     % Check if s is before segment starts.
                     if (e-s) < (fs*parm.durShort_s)
                         continue
@@ -348,7 +348,7 @@ for fidx = 1:size(FileList,1) % Make sure to change the start of the file list s
         if isempty(fend)
             fend = strfind(file,'.x.wav');
         end
-        newFile = fullfile(DetDir,[file(1:fend-1),'.mat']);
+        newFile = fullfile(parm.outDir,[file(1:fend-1),'.mat']);
         save(newFile,'allSmpPts','allExp','allCorrVal','allDur',...
             'allRmsNBefore','allRmsNAfter','allRmsDet','allPpNBefore',...
             'allPpNAfter','allPpDet','rawStart','rawDur','parm','bt','-v7.3');
