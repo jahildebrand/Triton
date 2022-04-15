@@ -47,17 +47,38 @@ uLabelWeights = round(max(labelOccurence)./labelOccurence);
 REMORA.nn.train_net.labelWeights = uLabelWeights;
 
 
-[myNetwork, trainPrefs] = nn_build_network
 fprintf('\n\n\n')
-
 trainDataAll(isnan(trainDataAll))=0;
+
+trainTestSetInfo.standardizeAll = 1;
+if trainTestSetInfo.standardizeAll
+    trainTestSetInfo.specStd = [min(trainDataAll(:,1:trainTestSetInfo.setSpecHDim),[],'all'),max(trainDataAll(:,1:trainTestSetInfo.setSpecHDim),[],'all')];
+    normSpec1 = trainDataAll(:,1:trainTestSetInfo.setSpecHDim)-trainTestSetInfo.specStd(1);
+    trainDataAll(:,1:trainTestSetInfo.setSpecHDim) = normSpec1./(trainTestSetInfo.specStd(2)-trainTestSetInfo.specStd(1));
+    ICIstart = trainTestSetInfo.setSpecHDim+1;
+    trainTestSetInfo.iciStd = std(max(trainDataAll(:,ICIstart:(ICIstart+trainTestSetInfo.setICIHDim-1)),[],2));
+    trainDataAll(:,ICIstart:(ICIstart+trainTestSetInfo.setICIHDim-1)) = trainDataAll(:,ICIstart:(ICIstart+trainTestSetInfo.setICIHDim-1))/trainTestSetInfo.iciStd(1);
+    
+    wavestart = trainTestSetInfo.setSpecHDim+trainTestSetInfo.setICIHDim+1;
+    trainTestSetInfo.waveStd = std(max(trainDataAll(:,wavestart:(wavestart+trainTestSetInfo.setWaveHDim-1)),[],2));
+    trainDataAll(:,wavestart:(wavestart+trainTestSetInfo.setWaveHDim-1)) = trainDataAll(:,wavestart:(wavestart+trainTestSetInfo.setWaveHDim-1))/trainTestSetInfo.waveStd(1);
+end
 
 %trainDataAll(:,182:381)=abs(trainDataAll(:,182:381)-.5)*2;
 train4D = table(mat2cell(trainDataAll,ones(size(trainDataAll,1),1)),categorical(trainLabelsAll));
 %reshape(trainDataAll,[1,size(trainDataAll,2),1,...
 %    size(trainDataAll,1)]);
 %net = trainNetwork(train4D,categorical(trainLabelsAll),myNetwork,trainPrefs);
+[myNetwork, trainPrefs] = nn_build_network(trainTestSetInfo)
+
+
 net = trainNetwork(train4D,myNetwork,trainPrefs);
+
+if min(min(trainDataAll))<-1
+    normMin = -1;
+else
+    normMin = 0;
+end
 fprintf('\n\n Confusion matrix:\n')
 
 % May need a solution for older matlabs and no toolbox. In that case, keras
@@ -68,9 +89,17 @@ fprintf('\n\n Confusion matrix:\n')
 confusionmat(YPred,categorical(trainLabelsAll))
 fprintf('\n\n\n')
 
-load(REMORA.nn.train_net.testFile);
+load(REMORA.nn.train_net.testFile,'testDataAll','testLabelsAll');
 testDataAll(isnan(testDataAll))=0;
 % testDataAll(:,182:381)=abs(testDataAll(:,182:381)-.5)*2;
+if trainTestSetInfo.standardizeAll
+    normSpec1 = testDataAll(:,1:trainTestSetInfo.setSpecHDim)-trainTestSetInfo.specStd(1);
+    testDataAll(:,1:trainTestSetInfo.setSpecHDim) = normSpec1./(trainTestSetInfo.specStd(2)-trainTestSetInfo.specStd(1));
+    wavestart = trainTestSetInfo.setSpecHDim+trainTestSetInfo.setICIHDim+1;
+    testDataAll(:,ICIstart:(ICIstart+trainTestSetInfo.setICIHDim-1)) = testDataAll(:,ICIstart:(ICIstart+trainTestSetInfo.setICIHDim-1))/trainTestSetInfo.iciStd(1);
+
+    testDataAll(:,wavestart:(wavestart+trainTestSetInfo.setWaveHDim-1)) = testDataAll(:,wavestart:(wavestart+trainTestSetInfo.setWaveHDim-1))/trainTestSetInfo.waveStd(1);
+end
 test4D = table(mat2cell(testDataAll,ones(size(testDataAll,1),1)),categorical(testLabelsAll));
 
 [YPredTrain,scoresTrain] = classify(net,train4D);
@@ -91,16 +120,16 @@ elseif contains(filenameStem,'_det_train')
     REMORA.nn.train_net.evalResultsFilename =  fullfile(REMORA.nn.train_net.outDir,[filenameStem,'_evalScores_det.mat']);
 end
 netTrainingInfo =  REMORA.nn.train_net.trainFile;
-save(REMORA.nn.train_net.networkFilename,'net','netTrainingInfo','trainTestSetInfo','typeNames')
+save(REMORA.nn.train_net.networkFilename,'net','netTrainingInfo','trainTestSetInfo','typeNames','trainPrefs')
 save(REMORA.nn.train_net.evalResultsFilename,'confusionMatrixEval','YPredEval',...
     'scoresEval','testLabelsAll','netTrainingInfo','trainTestSetInfo','typeNames')
 
 
 
-REMORA.fig.nn.training_plots{6} = nn_fn_plotconfusion(trainLabelsAll,YPredTrain,typeNames);
+REMORA.fig.nn.training_plots{6} = nn_fn_plotconfusionChart(trainLabelsAll,YPredTrain,typeNames);
 REMORA.fig.nn.training_plots{6};
 title('Confusion Matrix: Training Data')
-REMORA.fig.nn.training_plots{7} = nn_fn_plotconfusion(testLabelsAll,YPredEval,typeNames);
+REMORA.fig.nn.training_plots{7} = nn_fn_plotconfusionChart(testLabelsAll,YPredEval,typeNames);
 REMORA.fig.nn.training_plots{7};
 title('Confusion Matrix: Evaluation Data')
 
@@ -112,7 +141,7 @@ accuracyPercent = 100*(sum(testLabelsAll == double(YPredEval))/size(testLabelsAl
 fprintf('Overall accuracy on test dataset: %0.2f%%\n\n\n',accuracyPercent)
 
 %%% TODO: make normalization indices informed by prior steps!!!
-trainDataNorm = [nn_fn_normalize_spectrum(trainDataAll(:,1:181)),nn_fn_normalize_timeseries(trainDataAll(:,192:end))];
+% trainDataNorm = [nn_fn_normalize_spectrum(trainDataAll(:,1:181)),nn_fn_normalize_timeseries(trainDataAll(:,192:end))];
 nPlots = length(uLabels);
 nRows = 3;
 nCols = ceil(nPlots/nRows);
@@ -122,21 +151,23 @@ set(REMORA.fig.nn.training_plots{1},'name', 'Training Data')
 for iR = 1:nPlots
     subplot(nRows,nCols,iR)
     
-    imagesc(trainDataNorm(trainLabelsAll==iR,:)')
+    imagesc(trainDataAll(trainLabelsAll==iR,:)')
     set(gca,'ydir','normal')
     title(typeNames{iR})
+    set(gca,'clim',[normMin,1])
 end
 
 REMORA.fig.nn.training_plots{2} = figure;
 clf;colormap(jet)
 set(REMORA.fig.nn.training_plots{2},'name', 'Test Data')
-testDataNorm = [nn_fn_normalize_spectrum(testDataAll(:,1:181)),nn_fn_normalize_timeseries(testDataAll(:,192:end))];
+%testDataNorm = [nn_fn_normalize_spectrum(testDataAll(:,1:181)),nn_fn_normalize_timeseries(testDataAll(:,192:end))];
 
 for iR = 1:nPlots
     subplot(nRows,nCols,iR)
-    imagesc(testDataNorm(testLabelsAll==iR,:)')
+    imagesc(testDataAll(testLabelsAll==iR,:)')
     set(gca,'ydir','normal')
     title(typeNames{iR})
+    set(gca,'clim',[normMin,1])
 end
 
 REMORA.fig.nn.training_plots{3} = figure;
@@ -146,9 +177,10 @@ for iR = 1:nPlots
     subplot(nRows,nCols,iR)
     idxToPlot = find(double(YPredEval)==iR);
     [classScore,plotOrder] = sort(bestScores(idxToPlot),'descend');
-    imagesc(testDataNorm(idxToPlot(plotOrder),:)')
+    imagesc(testDataAll(idxToPlot(plotOrder),:)')
     set(gca,'ydir','normal')
     title(typeNames{iR})
+    set(gca,'clim',[normMin,1])
 end
 
 REMORA.fig.nn.training_plots{4} = figure;
@@ -161,9 +193,11 @@ for iR = 1:nPlots
     [classScore,plotOrder] = sort(bestScores(misclassIdx),'descend');
 
     subplot(nRows,nCols,iR)
-    imagesc(testDataNorm(misclassIdx(plotOrder),:)')
+    imagesc(testDataAll(misclassIdx(plotOrder),:)')
     set(gca,'ydir','normal')
-    title(typeNames{iR})
+    title(typeNames{iR})   
+    set(gca,'clim',[normMin,1])
+
 end
 
 diary off

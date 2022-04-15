@@ -126,8 +126,14 @@ nSpecMat = horzcat(binDataPruned.nSpec)';
 dTTmat = vertcat(binDataPruned.dTT);
 cRateMat = vertcat(binDataPruned.clickRate);
 clickTimes = horzcat(binDataPruned(:).clickTimes);
+if ~isfield(p,'maxDur')
+    p.maxDur = 1;
+end
 for iEM = 1:size(binDataPruned,1)
-    if size(binDataPruned(iEM).envMean,2) == 1
+    if ~isfield(binDataPruned,'envMean')
+       binDataPruned(iEM).envMean = [];
+    end
+    if size(binDataPruned(iEM).envMean,2) == 1 || size(binDataPruned(iEM).envMean,2) == 0
         binDataPruned(iEM).envMean = zeros(1,p.maxDur);
     end
     %     if size(binDataPruned(iEM).envMean,2) == 1
@@ -180,6 +186,19 @@ end
 if ~isfield(s,'normalizeSpectra') 
     s.normalizeSpectra = 1;
 end
+
+if s.useEnvShapeTF
+    noZeros = max(envShape,[],2)>0;
+    useBins = logical(min(useBins,noZeros));
+end
+% s.rmMFA = 1;
+% if s.rmMFA
+%     [~,maxLoc] = max(mean(envShape));
+%     badBins = (envShape(:,maxLoc-2)<.20&envShape(:,maxLoc+2)<.2);
+%     useBins = logical(min(useBins,~badBins));
+% 
+% end
+
 [specNorm,diffNormSpec] = ct_spec_norm_diff(sumSpecMat(useBins,:),s.stIdx,s.edIdx, s.linearTF,s);
 
 [~,s.maxICIidx] = min(abs(p.barInt-s.maxICI));
@@ -237,6 +256,30 @@ if  tritonMode && isfield(REMORA.ct.CC,'rm_clusters')...
     specNorm = specNorm(removeSetIndex,:);
     diffNormSpec = diffNormSpec(removeSetIndex,:);
     envShape = envShape(removeSetIndex,:);
+end
+mergeSimilarNodes = 0;
+if mergeSimilarNodes
+    rmNode = zeros(size(specNorm,1),1);
+    [specDist,~,~] = ct_spectra_dist(specNorm);
+    sqSpecDist = squareform(specDist);
+    mergeNodeID = (1:size(specNorm,1))';
+    for iNode = 1:length(mergeNodeID)
+        % find the next signal that looks like this one
+        newNum = find(sqSpecDist(iNode,iNode:end)>.99,1,'first');
+        if ~isempty(newNum)
+            rmNode(iNode) = 1;
+        end
+    end
+    rmSet = ~logical(rmNode);
+    cRateMat = cRateMat(rmSet,:);
+    clickTimes = clickTimes(rmSet);
+    tIntMat = tIntMat(rmSet);
+    subOrder = subOrder(rmSet);
+    fileNumExpand = fileNumExpand(rmSet);
+    dTTmatNorm = dTTmatNorm(rmSet,:);
+    specNorm = specNorm(rmSet,:);
+    diffNormSpec = diffNormSpec(rmSet,:);
+    envShape = envShape(rmSet,:);
 end
 for iEA = 1:s.N
     % Select random subset if needed
@@ -490,10 +533,16 @@ compositeData = struct(...
     'spectraMeanSet',[],'specPrctile',{},'iciMean',[],...
     'iciStd',[],'cRateMean',[],'cRateStd',[]);
 Tfinal = {};
+
+if s.linearTF
+    specNorm = (20*log10(specNorm))-1;
+end
+
 for iTF = 1:length(nodeSet)
     % compute mean of spectra in linear space
-    linearSpec = 10.^(specNorm(nodeSet{iTF},:)./20);
-    compositeData(iTF,1).spectraMeanSet = 20*log10(nanmean(linearSpec));
+    compositeData(iTF,1).spectraMeanSet = nanmean(specNorm(nodeSet{iTF},:),1);
+
+    %linearSpec = 10.^(specNorm(nodeSet{iTF},:)./20);
     compositeData(iTF,1).specPrctile = prctile(specNorm(nodeSet{iTF},:),[25,75]);
     compositeData(iTF,1).iciMean = nanmean(dTTmatNorm(nodeSet{iTF},:));
     compositeData(iTF,1).iciStd = nanstd(dTTmatNorm(nodeSet{iTF},:));
@@ -552,7 +601,7 @@ if s.saveOutput
         thisType.Tfinal = Tfinal(iType,:);
         % [~,~,bin2Nodes] = intersect(thisType.Tfinal{1,7},tIntMat,'stable');
         thisType.tIntMat = tIntMat(Tfinal{iType,8});
-        thisType.clickTimes = vertcat(clickTimes{Tfinal{iType,8}});
+        thisType.clickTimes = clickTimes(Tfinal{iType,8});
         thisType.fileNumExpand = fileNumExpand(Tfinal{iType,8});
         if ~exist('TPWSList','var')
             TPWSList = [];
